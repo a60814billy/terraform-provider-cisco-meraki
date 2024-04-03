@@ -9,7 +9,7 @@ terraform {
 variable "api_key" {
   type        = string
   description = "The Meraki API key"
-  default = "1d8b4f977530c14b268886a45096272c99ed727c"
+  default     = "1d8b4f977530c14b268886a45096272c99ed727c"
 }
 
 provider "ciscomeraki" {
@@ -19,7 +19,21 @@ provider "ciscomeraki" {
 data "ciscomeraki_orgs" "orgs" {}
 
 data "ciscomeraki_org" "first_org" {
-    id = data.ciscomeraki_orgs.orgs.ids.0
+  id = data.ciscomeraki_orgs.orgs.ids.0
+}
+
+resource "ciscomeraki_network" "hq_network" {
+  org_id        = data.ciscomeraki_org.first_org.id
+  name          = "HQ Network"
+  time_zone     = "Asia/Taipei"
+  product_types = [
+    "appliance",
+    "camera",
+    "cellularGateway",
+    "sensor",
+    "switch",
+    "wireless"
+  ]
 }
 
 output "orgs" {
@@ -28,4 +42,8 @@ output "orgs" {
 
 output "org" {
   value = data.ciscomeraki_org.first_org
+}
+
+output "network_hq_network" {
+  value = ciscomeraki_network.hq_network
 }

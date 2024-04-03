@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"github.com/a60814billy/terraform-provider-cisco-meraki/internal/provider/configure/networks"
 	"github.com/a60814billy/terraform-provider-cisco-meraki/internal/provider/configure/organizations"
 	"github.com/a60814billy/terraform-provider-cisco-meraki/meraki"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -69,5 +70,7 @@ func (p *ciscoMerakiProvider) DataSources(ctx context.Context) []func() datasour
 }
 
 func (p *ciscoMerakiProvider) Resources(ctx context.Context) []func() resource.Resource {
-	return []func() resource.Resource{}
+	return []func() resource.Resource{
+		networks.NewNetworkResource,
+	}
 }
