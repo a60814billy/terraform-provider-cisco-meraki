@@ -24,7 +24,7 @@ type organizationsDataSource struct {
 }
 
 type organizationsDataSourceModel struct {
-	IDs []string `tfsdk:"ids"`
+	IDs []types.String `tfsdk:"ids"`
 }
 
 func (d *organizationsDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -73,7 +73,7 @@ func (d *organizationsDataSource) Read(ctx context.Context, req datasource.ReadR
 	var state organizationsDataSourceModel
 
 	for _, org := range orgs {
-		state.IDs = append(state.IDs, org.ID)
+		state.IDs = append(state.IDs, types.StringValue(org.ID))
 	}
 
 	diags := resp.State.Set(ctx, &state)
