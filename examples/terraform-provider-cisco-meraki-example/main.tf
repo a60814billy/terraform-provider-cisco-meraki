@@ -18,6 +18,14 @@ provider "ciscomeraki" {
 
 data "ciscomeraki_orgs" "orgs" {}
 
+data "ciscomeraki_org" "first_org" {
+    id = data.ciscomeraki_orgs.orgs.ids.0
+}
+
 output "orgs" {
   value = data.ciscomeraki_orgs.orgs
+}
+
+output "org" {
+  value = data.ciscomeraki_org.first_org
 }

@@ -31,6 +31,7 @@ type Organization struct {
 
 type Client interface {
 	GetOrganizations() ([]Organization, error)
+	GetOrganization(orgID string) (*Organization, error)
 }
 
 func NewClient(apiToken string) Client {
@@ -66,4 +67,29 @@ func (c *client) GetOrganizations() ([]Organization, error) {
 		return nil, err
 	}
 	return orgs, nil
+}
+
+func (c *client) GetOrganization(orgID string) (*Organization, error) {
+	url := base_url + "/organizations/" + orgID
+
+	// use the token to make http get request to the url
+	httpClient := &http.Client{}
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Authorization", "Bearer "+c.token)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// parse the response body into a organization slice
+	var org Organization
+	err = json.NewDecoder(resp.Body).Decode(&org)
+	if err != nil {
+		return nil, err
+	}
+	return &org, nil
 }

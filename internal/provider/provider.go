@@ -64,6 +64,7 @@ func (p *ciscoMerakiProvider) Configure(ctx context.Context, req provider.Config
 func (p *ciscoMerakiProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		organizations.NewOrganizationsDataSource,
+		organizations.NewOrganizationDataSource,
 	}
 }
 
