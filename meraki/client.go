@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"io"
 	"net/http"
@@ -49,14 +50,17 @@ type Network struct {
 
 type NetworkCreateRequest struct {
 	Name         string   `json:"name"`
-	ProductTypes []string `json:"productTypes"`
+	Notes        string   `json:"notes,omitempty"`
 	TimeZone     string   `json:"timeZone"`
-	Tags         []string `json:"tags"`
+	ProductTypes []string `json:"productTypes,omitempty"`
+	Tags         []string `json:"tags,omitempty"`
 }
 
 type NetworkUpdateRequest struct {
-	Name     string `json:"name,omitempty"`
-	TimeZone string `json:"timeZone,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	TimeZone string   `json:"timeZone,omitempty"`
+	Notes    string   `json:"notes,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 type Client interface {
@@ -67,6 +71,7 @@ type Client interface {
 	// Networks
 	CreateNetwork(orgID string, network *NetworkCreateRequest) (*Network, error)
 	GetNetwork(id string) (*Network, error)
+	GetNetworkInOrg(OrgID string, id string) (*Network, error)
 	UpdateNetwork(id string, network *NetworkUpdateRequest) (*Network, error)
 	DeleteNetwork(id string) error
 }
@@ -193,6 +198,36 @@ func (c *client) GetNetwork(id string) (*Network, error) {
 		return nil, err
 	}
 	return &net, nil
+}
+
+func (c *client) GetNetworkInOrg(OrgID string, id string) (*Network, error) {
+	url := base_url + "/organizations/" + OrgID + "/networks"
+	// use the token to make http get request to the url
+	req, err := http.NewRequest("GET", url, nil)
+
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Add("Authorization", "Bearer "+c.token)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// parse the response body into a organization slice
+	var nets []Network
+	err = json.NewDecoder(resp.Body).Decode(&nets)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, net := range nets {
+		if net.ID == id {
+			return &net, nil
+		}
+	}
+	return nil, errors.New(fmt.Sprintf("Network with id %s not found in organization %s", id, OrgID))
 }
 
 func (c *client) UpdateNetwork(id string, network *NetworkUpdateRequest) (*Network, error) {

@@ -26,13 +26,19 @@ resource "ciscomeraki_network" "hq_network" {
   org_id        = data.ciscomeraki_org.first_org.id
   name          = "HQ Network"
   time_zone     = "Asia/Taipei"
+  notes         = "This is a test network"
   product_types = [
     "appliance",
     "camera",
     "cellularGateway",
     "sensor",
     "switch",
-    "wireless"
+    "wireless",
+    "systemsManager"
+  ]
+  tags = [
+    "test",
+    "region_1"
   ]
 }
 
@@ -45,5 +51,5 @@ output "org" {
 }
 
 output "network_hq_network" {
-  value = ciscomeraki_network.hq_network
+  value = ciscomeraki_network.hq_network.url
 }

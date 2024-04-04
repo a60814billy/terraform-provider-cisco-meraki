@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/a60814billy/terraform-provider-cisco-meraki/meraki"
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/setplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -32,10 +32,11 @@ type NetworkResourceModel struct {
 	ID           types.String `tfsdk:"id"`
 	OrgID        types.String `tfsdk:"org_id"`
 	Name         types.String `tfsdk:"name"`
-	ProductTypes types.List   `tfsdk:"product_types"`
+	ProductTypes types.Set    `tfsdk:"product_types"`
 	TimeZone     types.String `tfsdk:"time_zone"`
-	Tags         types.List   `tfsdk:"tags"`
+	Tags         types.Set    `tfsdk:"tags"`
 	URL          types.String `tfsdk:"url"`
+	Notes        types.String `tfsdk:"notes"`
 }
 
 func (n *networkResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -67,19 +68,26 @@ func (n *networkResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Required:    true,
 				Description: "The name of the network",
 			},
-			"product_types": schema.ListAttribute{
+			"product_types": schema.SetAttribute{
 				Optional:    true,
 				Description: "The product types of the network. Can be one or more of 'wireless', 'appliance', 'switch', 'systemsManager', 'camera', 'cellularGateway' or 'sensor'",
 				ElementType: types.StringType,
+				PlanModifiers: []planmodifier.Set{
+					setplanmodifier.RequiresReplace(),
+				},
 			},
 			"time_zone": schema.StringAttribute{
 				Required:    true,
 				Description: "The timezone of the network",
 			},
-			"tags": schema.ListAttribute{
+			"tags": schema.SetAttribute{
 				Optional:    true,
 				Description: "A list of tags to be applied to the network",
 				ElementType: types.StringType,
+			},
+			"notes": schema.StringAttribute{
+				Optional:    true,
+				Description: "Add any notes or additional information about this network here",
 			},
 		},
 	}
@@ -118,50 +126,69 @@ func (n *networkResource) Create(ctx context.Context, req resource.CreateRequest
 		"timezone": plan.TimeZone.ValueString(),
 	})
 
-	//tfTags := make([]types.String, 0, len(plan.Tags.Elements()))
-	//diags = plan.Tags.ElementsAs(ctx, &tfTags, false)
-	//resp.Diagnostics.Append(diags...)
-	//if resp.Diagnostics.HasError() {
-	//	return
-	//}
-	//tags := make([]string, 0, len(tfTags))
-	//for _, tag := range tfTags {
-	//	tags = append(tags, tag.ValueString())
-	//}
-
 	networkReqData := &meraki.NetworkCreateRequest{
-		Name:         plan.Name.ValueString(),
-		TimeZone:     plan.TimeZone.ValueString(),
-		ProductTypes: []string{"systemsManager"},
+		Name:     plan.Name.ValueString(),
+		TimeZone: plan.TimeZone.ValueString(),
 	}
 
+	if !plan.Notes.IsNull() {
+		networkReqData.Notes = plan.Notes.ValueString()
+	}
+
+	// set productTypes
+	if plan.ProductTypes.IsNull() || len(plan.ProductTypes.Elements()) == 0 {
+		// if productTypes is not set, set default values to all product types
+		networkReqData.ProductTypes = []string{
+			"wireless",
+			"appliance",
+			"switch",
+			"camera",
+			"cellularGateway",
+			"sensor",
+			"systemsManager",
+		}
+	} else if len(plan.ProductTypes.Elements()) > 0 {
+		pts := make([]types.String, 0, len(plan.ProductTypes.Elements()))
+		resp.Diagnostics.Append(plan.ProductTypes.ElementsAs(ctx, &pts, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, pt := range pts {
+			networkReqData.ProductTypes = append(networkReqData.ProductTypes, pt.ValueString())
+		}
+	}
+
+	if !plan.Tags.IsNull() && len(plan.Tags.Elements()) > 0 {
+		tf_tags := make([]types.String, 0, len(plan.Tags.Elements()))
+		resp.Diagnostics.Append(plan.Tags.ElementsAs(ctx, &tf_tags, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, tag := range tf_tags {
+			networkReqData.Tags = append(networkReqData.Tags, tag.ValueString())
+		}
+	}
+
+	tflog.Info(ctx, fmt.Sprintf("Data: %v", map[string]any{
+		"productTypes": networkReqData.ProductTypes,
+	}))
+
 	network, err := n.client.CreateNetwork(plan.OrgID.ValueString(), networkReqData)
+	tflog.Info(ctx, fmt.Sprintf("API called, Network: %v", network))
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to create network",
-			"Failed to create network: "+err.Error(),
+			fmt.Sprintf("Failed to create network: %s, %v", err.Error(), networkReqData),
 		)
 		return
 	}
 
-	tflog.Info(ctx, "data", map[string]any{
-		"network_id":     network.ID,
-		"network_url":    network.URL,
-		"network_name":   network.Name,
-		"network_org_id": network.OrgID,
-		"network_tz":     network.TimeZone,
-	})
+	plan.ID = types.StringValue(network.ID)
+	plan.URL = types.StringValue(network.URL)
 
-	var state NetworkResourceModel
-	state.ID = types.StringValue(network.ID)
-	state.OrgID = types.StringValue(network.OrgID)
-	state.Name = types.StringValue(network.Name)
-	state.TimeZone = types.StringValue(network.TimeZone)
-
-	state.URL = types.StringValue(network.URL)
-
-	diags := resp.State.Set(ctx, &state)
-	resp.Diagnostics.Append(diags...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -178,7 +205,7 @@ func (n *networkResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	network, err := n.client.GetNetwork(state.ID.ValueString())
+	network, err := n.client.GetNetworkInOrg(state.OrgID.ValueString(), state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			"Failed to get network",
@@ -186,27 +213,47 @@ func (n *networkResource) Read(ctx context.Context, req resource.ReadRequest, re
 		)
 		return
 	}
+	tflog.Info(ctx, fmt.Sprintf("Network: %v", network))
 
 	state.ID = types.StringValue(network.ID)
 	state.OrgID = types.StringValue(network.OrgID)
+
+	if state.URL.IsNull() {
+		// set URL only if it is not set
+		// because it's changed frequently
+		state.URL = types.StringValue(network.URL)
+	}
+
 	state.Name = types.StringValue(network.Name)
 	state.TimeZone = types.StringValue(network.TimeZone)
-
-	var tfTags []attr.Value
-	for _, tag := range network.Tags {
-		tfTags = append(tfTags, types.StringValue(tag))
+	if len(network.Notes) > 0 {
+		state.Notes = types.StringValue(network.Notes)
 	}
-	//state.Tags, diags = types.ListValue(types.StringType, tfTags)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-	state.URL = types.StringValue(network.URL)
 
-	state.ProductTypes, diags = types.ListValueFrom(ctx, types.StringType, network.ProductTypes)
-	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
+	if len(network.ProductTypes) > 0 {
+		tf_pts := make([]types.String, 0, len(network.ProductTypes))
+		for _, pt := range network.ProductTypes {
+			tf_pts = append(tf_pts, types.StringValue(pt))
+		}
+		pts, diags := types.SetValueFrom(ctx, types.StringType, tf_pts)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.ProductTypes = pts
+	}
+
+	if len(network.Tags) > 0 {
+		tf_tags := make([]types.String, 0, len(network.Tags))
+		for _, tag := range network.Tags {
+			tf_tags = append(tf_tags, types.StringValue(tag))
+		}
+		tags, diags := types.SetValueFrom(ctx, types.StringType, tf_tags)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		state.Tags = tags
 	}
 
 	diags = resp.State.Set(ctx, &state)
@@ -230,28 +277,34 @@ func (n *networkResource) Update(ctx context.Context, req resource.UpdateRequest
 	var networkUpdateReqData meraki.NetworkUpdateRequest
 
 	// get changed fields
-	if !plan.ProductTypes.Equal(state.ProductTypes) {
-		resp.Diagnostics.AddError("Can't not change ProductTypes", "Can't not change ProductTypes")
-		return
-	}
-
 	if !plan.Name.Equal(state.Name) {
 		networkUpdateReqData.Name = plan.Name.ValueString()
 	}
 	if !plan.TimeZone.Equal(state.TimeZone) {
 		networkUpdateReqData.TimeZone = plan.TimeZone.ValueString()
 	}
+	if !plan.Notes.Equal(state.Notes) {
+		networkUpdateReqData.Notes = plan.Notes.ValueString()
+	}
+	if !plan.Tags.Equal(state.Tags) {
+		tags := make([]types.String, 0, len(plan.Tags.Elements()))
+		resp.Diagnostics.Append(plan.Tags.ElementsAs(ctx, &tags, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
 
-	network, err := n.client.UpdateNetwork(state.ID.ValueString(), &networkUpdateReqData)
+		for _, tag := range tags {
+			networkUpdateReqData.Tags = append(networkUpdateReqData.Tags, tag.ValueString())
+		}
+	}
+
+	_, err := n.client.UpdateNetwork(state.ID.ValueString(), &networkUpdateReqData)
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to update network", "Failed to update network: "+err.Error())
 		return
 	}
 
-	state.TimeZone = types.StringValue(network.TimeZone)
-	state.Name = types.StringValue(network.Name)
-
-	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
